@@ -2,12 +2,16 @@
 
 A simple Tkinter GUI application to fetch and export tracks from a user's public Spotify playlists.
 
+![Spotifetchr Main Interface](assets/main.png)
+
 ## Features
 
 - Fetch all public playlists owned by any Spotify user
 - Display tracks in a sortable table (by Artist, Title, Album, or Playlist)
-- Option to remove duplicate tracks automatically (keeps most frequently occurring version)
 - Option to export data to Excel (.xlsx)
+- Option to remove duplicate tracks automatically
+
+![Remove Duplicates Feature](assets/removeduplicates.png)
 
 ## Requirements
 

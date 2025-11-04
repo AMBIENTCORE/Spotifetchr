@@ -367,54 +367,30 @@ class SpotifetchrApp(tk.Tk):
             messagebox.showinfo("No data", "There is no data to process.")
             return
 
-        from collections import defaultdict
-
-        # Group tracks by (artist, title) - case insensitive
-        duplicates_map = defaultdict(list)
-        for idx, row in enumerate(self.rows):
-            key = (row.artist.lower(), row.title.lower())
-            duplicates_map[key].append(idx)
-
-        # Find which tracks to remove
+        # Track which unique songs we've seen (case insensitive artist + title)
+        seen = set()
+        unique_rows = []
         removed_tracks = []
-        indices_to_remove = set()
 
-        for key, indices in duplicates_map.items():
-            if len(indices) <= 1:
-                continue  # Not a duplicate
+        for row in self.rows:
+            key = (row.artist.lower(), row.title.lower())
+            if key not in seen:
+                seen.add(key)
+                unique_rows.append(row)
+            else:
+                removed_tracks.append(row)
 
-            # Count occurrences per playlist
-            playlist_counts = defaultdict(list)
-            for idx in indices:
-                playlist_counts[self.rows[idx].playlist].append(idx)
-
-            # Find playlist with most occurrences
-            max_playlist = max(playlist_counts.items(), key=lambda x: len(x[1]))
-            playlist_to_keep = max_playlist[0]
-            indices_in_max_playlist = max_playlist[1]
-
-            # Keep one from the playlist with most occurrences, remove all others
-            keep_idx = indices_in_max_playlist[0]
-            
-            for idx in indices:
-                if idx != keep_idx:
-                    indices_to_remove.add(idx)
-                    removed_tracks.append(self.rows[idx])
-
-        # Remove duplicates
+        # Check if any duplicates were found
         if not removed_tracks:
             messagebox.showinfo("No Duplicates", "No duplicate tracks were found.")
             return
 
-        # Create new rows list without duplicates
-        new_rows = [row for idx, row in enumerate(self.rows) if idx not in indices_to_remove]
-        
-        # Update table
+        # Update table with unique tracks only
         self._clear_table()
-        for r in new_rows:
+        for r in unique_rows:
             self.tree.insert("", tk.END, values=(r.artist, r.title, r.album, r.playlist))
-        self.rows = new_rows
-        self.track_count_var.set(f"Tracks: {len(new_rows)}")
+        self.rows = unique_rows
+        self.track_count_var.set(f"Tracks: {len(unique_rows)}")
 
         # Show results dialog
         self._show_duplicates_result(len(removed_tracks), removed_tracks)
