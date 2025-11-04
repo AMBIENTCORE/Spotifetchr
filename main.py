@@ -249,6 +249,7 @@ class SpotifetchrApp(tk.Tk):
         actions = ttk.Frame(self)
         actions.pack(side=tk.TOP, fill=tk.X, padx=10, pady=(10, 0))
         ttk.Button(actions, text="Extract", command=self._on_extract).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Remove Duplicates", command=self._remove_duplicates).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(actions, text="Export to Excel", command=self._export_excel).pack(side=tk.LEFT, padx=(8, 0))
 
         # Table
@@ -267,11 +268,15 @@ class SpotifetchrApp(tk.Tk):
         self.tree.column("playlist", width=260, anchor="w")
 
         vs = ttk.Scrollbar(table_container, orient="vertical", command=self.tree.yview)
-        hs = ttk.Scrollbar(table_container, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vs.set, xscrollcommand=hs.set)
+        self.tree.configure(yscrollcommand=vs.set)
         vs.pack(side=tk.RIGHT, fill=tk.Y)
-        hs.pack(side=tk.BOTTOM, fill=tk.X)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Bottom bar: track count
+        bottom = ttk.Frame(self)
+        bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(0, 10))
+        self.track_count_var = tk.StringVar(value="Tracks: 0")
+        ttk.Label(bottom, textvariable=self.track_count_var, font=("TkDefaultFont", 10)).pack(side=tk.RIGHT)
 
         # Sort state
         self.sort_column = "album"
@@ -357,12 +362,151 @@ class SpotifetchrApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Export error", f"Failed to export:\\n{e}")
 
+    def _remove_duplicates(self):
+        if not self.rows:
+            messagebox.showinfo("No data", "There is no data to process.")
+            return
+
+        from collections import defaultdict
+
+        # Group tracks by (artist, title) - case insensitive
+        duplicates_map = defaultdict(list)
+        for idx, row in enumerate(self.rows):
+            key = (row.artist.lower(), row.title.lower())
+            duplicates_map[key].append(idx)
+
+        # Find which tracks to remove
+        removed_tracks = []
+        indices_to_remove = set()
+
+        for key, indices in duplicates_map.items():
+            if len(indices) <= 1:
+                continue  # Not a duplicate
+
+            # Count occurrences per playlist
+            playlist_counts = defaultdict(list)
+            for idx in indices:
+                playlist_counts[self.rows[idx].playlist].append(idx)
+
+            # Find playlist with most occurrences
+            max_playlist = max(playlist_counts.items(), key=lambda x: len(x[1]))
+            playlist_to_keep = max_playlist[0]
+            indices_in_max_playlist = max_playlist[1]
+
+            # Keep one from the playlist with most occurrences, remove all others
+            keep_idx = indices_in_max_playlist[0]
+            
+            for idx in indices:
+                if idx != keep_idx:
+                    indices_to_remove.add(idx)
+                    removed_tracks.append(self.rows[idx])
+
+        # Remove duplicates
+        if not removed_tracks:
+            messagebox.showinfo("No Duplicates", "No duplicate tracks were found.")
+            return
+
+        # Create new rows list without duplicates
+        new_rows = [row for idx, row in enumerate(self.rows) if idx not in indices_to_remove]
+        
+        # Update table
+        self._clear_table()
+        for r in new_rows:
+            self.tree.insert("", tk.END, values=(r.artist, r.title, r.album, r.playlist))
+        self.rows = new_rows
+        self.track_count_var.set(f"Tracks: {len(new_rows)}")
+
+        # Show results dialog
+        self._show_duplicates_result(len(removed_tracks), removed_tracks)
+
+    def _show_duplicates_result(self, count: int, removed_tracks: List[TrackRow]):
+        """Show a dialog with duplicate removal results and an expandable list."""
+        dialog = tk.Toplevel(self)
+        dialog.title("Duplicates Removed")
+        dialog.geometry("600x400")
+        dialog.configure(bg='#2b2b2b')
+        
+        # Make it modal
+        dialog.transient(self)
+        dialog.grab_set()
+
+        # Summary message
+        summary_frame = ttk.Frame(dialog)
+        summary_frame.pack(side=tk.TOP, fill=tk.X, padx=20, pady=20)
+        
+        summary_label = ttk.Label(
+            summary_frame, 
+            text=f"Successfully removed {count} duplicate track{'s' if count != 1 else ''}!",
+            font=("TkDefaultFont", 11, "bold")
+        )
+        summary_label.pack()
+
+        # Expandable list section
+        list_frame = ttk.Frame(dialog)
+        list_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+
+        # Toggle button and list
+        self._list_visible = False
+        list_container = ttk.Frame(list_frame)
+        
+        def toggle_list():
+            if self._list_visible:
+                list_container.pack_forget()
+                toggle_btn.configure(text="Show List ▼")
+                self._list_visible = False
+            else:
+                list_container.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(10, 0))
+                toggle_btn.configure(text="Hide List ▲")
+                self._list_visible = True
+
+        toggle_btn = ttk.Button(list_frame, text="Show List ▼", command=toggle_list)
+        toggle_btn.pack(side=tk.TOP, pady=(0, 0))
+
+        # Create the list (Treeview)
+        tree = ttk.Treeview(
+            list_container, 
+            columns=("artist", "title", "album", "playlist"), 
+            show="headings",
+            height=10
+        )
+        tree.heading("artist", text="Artist")
+        tree.heading("title", text="Title")
+        tree.heading("album", text="Album")
+        tree.heading("playlist", text="Playlist")
+        
+        tree.column("artist", width=150, anchor="w")
+        tree.column("title", width=150, anchor="w")
+        tree.column("album", width=130, anchor="w")
+        tree.column("playlist", width=130, anchor="w")
+
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(list_container, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Populate with removed tracks
+        for track in removed_tracks:
+            tree.insert("", tk.END, values=(track.artist, track.title, track.album, track.playlist))
+
+        # Close button
+        close_btn = ttk.Button(dialog, text="Close", command=dialog.destroy)
+        close_btn.pack(side=tk.BOTTOM, pady=(0, 20))
+
+        # Center dialog on parent
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() // 2) - (dialog.winfo_width() // 2)
+        y = self.winfo_y() + (self.winfo_height() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
     # ----------------- Table helpers -----------------
 
     def _clear_table(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
         self.rows = []
+        self.track_count_var.set("Tracks: 0")
 
     def _fill_table(self, rows: List[TrackRow]):
         # Initially grouped by album → sort by album (then artist/title)
@@ -372,6 +516,7 @@ class SpotifetchrApp(tk.Tk):
         self.rows = rows
         self.sort_column = "album"
         self.sort_reverse = False
+        self.track_count_var.set(f"Tracks: {len(rows)}")
 
     def _sort_table(self, column: str):
         if not self.rows:
